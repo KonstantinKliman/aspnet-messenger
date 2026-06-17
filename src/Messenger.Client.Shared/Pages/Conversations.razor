@@ -1,0 +1,116 @@
+@page "/conversations"
+@inject AuthService Auth
+@inject ChatApi Api
+@inject ChatConnection Connection
+@inject ApiConfig ApiConfig
+@inject NavigationManager Navigation
+@using Messenger.Client.Shared.Components
+@using Messenger.Contracts.Dtos.Users
+
+@using Messenger.Contracts.Dtos.Messages
+@using Messenger.Contracts.Hubs.Events
+@implements IAsyncDisposable
+
+<div class="h-screen w-screen overflow-hidden">
+    <div class="grid h-full md:grid-cols-[360px_1fr]">
+
+        <div class="@ListPaneClass border-r border-gray-200">
+            <ConversationList @ref="_list"
+                              SelectedId="_selectedId"
+                              OnSelect="HandleSelect"
+                              OnNewChat="ShowNewChat"
+                              OnLogout="HandleLogout" />
+        </div>
+
+        <div class="@ChatPaneClass">
+            <ChatView @ref="_chat"
+                      ConversationId="_selectedId"
+                      OnBack="HandleBack"
+                      OnMessageSent="ReloadList" />
+        </div>
+    </div>
+</div>
+
+@if (_showNewChat)
+{
+    <NewChatDialog OnClose="() => _showNewChat = false"
+                   OnUserSelected="HandleNewChatUser" />
+}
+
+@code {
+    private ConversationList? _list;
+    private ChatView? _chat;
+    private Guid? _selectedId;
+    private bool _showNewChat;
+
+    private string ListPaneClass =>
+        _selectedId is null ? "block h-full" : "hidden h-full md:block";
+
+    private string ChatPaneClass =>
+        _selectedId is null ? "hidden h-full md:block" : "block h-full";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Auth.CurrentUser is null)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        Connection.MessageReceived += OnMessageReceived;
+        Connection.UserTyping += OnUserTyping;
+        await Connection.StartAsync(ApiConfig.BaseUrl);
+    }
+
+    private void OnMessageReceived(MessageDto msg)
+    {
+        // Если открыт тот же диалог — добавляем в окно чата
+        if (msg.ConversationId == _selectedId && _chat is not null)
+        {
+            _chat.AppendMessage(msg);
+        }
+
+        // В любом случае обновляем список (превью + бейдж)
+        InvokeAsync(ReloadList);
+    }
+
+    private void HandleSelect(Guid id) => _selectedId = id;
+    private void HandleBack() => _selectedId = null;
+
+    private async Task ReloadList()
+    {
+        if (_list is not null) await _list.Reload();
+    }
+
+    private void ShowNewChat() => _showNewChat = true;
+
+    private async Task HandleNewChatUser(UserDto user)
+    {
+        _showNewChat = false;
+        var conv = await Api.OpenDirectAsync(user.Id);
+        if (conv is not null)
+        {
+            await ReloadList();
+            _selectedId = conv.Id;
+        }
+    }
+
+    private async Task HandleLogout()
+    {
+        await Auth.LogoutAsync();
+        Navigation.NavigateTo("/login");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Connection.MessageReceived -= OnMessageReceived;
+        Connection.UserTyping -= OnUserTyping;
+        await Connection.DisposeAsync();
+    }
+    
+    private void OnUserTyping(TypingEvent evt)
+    {
+        if (_chat is not null)
+            _chat.SetPeerTyping(evt.ConversationId, evt.IsTyping);
+    }
+}

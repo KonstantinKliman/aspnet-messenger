@@ -1,0 +1,71 @@
+@using Messenger.Contracts.Dtos.Users
+@inject ChatApi Api
+
+<div class="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-20"
+     @onclick="() => OnClose.InvokeAsync()">
+    <div class="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl"
+         @onclick:stopPropagation="true">
+        <h2 class="mb-3 text-lg font-semibold">Новый чат</h2>
+
+        <input @bind="_query" @bind:event="oninput" @bind:after="Search"
+               placeholder="Поиск по имени пользователя…"
+               class="mb-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+
+        <div class="max-h-64 overflow-y-auto">
+            @if (_searching)
+            {
+                <div class="p-3 text-center text-sm text-gray-400">Поиск…</div>
+            }
+            else if (_query.Length >= 2 && _results.Count == 0)
+            {
+                <div class="p-3 text-center text-sm text-gray-400">Никого не найдено</div>
+            }
+            else
+            {
+                @foreach (var user in _results)
+                {
+                    <button @onclick="() => OnUserSelected.InvokeAsync(user)"
+                            class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-50 transition">
+                        <div class="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-xs font-medium text-blue-700">
+                            @Initials(user.DisplayName)
+                        </div>
+                        <div>
+                            <div class="text-sm font-medium text-gray-900">@user.DisplayName</div>
+                            <div class="text-xs text-gray-500">@@@user.Username</div>
+                        </div>
+                    </button>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<UserDto> OnUserSelected { get; set; }
+
+    private string _query = "";
+    private List<UserDto> _results = [];
+    private bool _searching;
+
+    private async Task Search()
+    {
+        if (_query.Trim().Length < 2)
+        {
+            _results = [];
+            return;
+        }
+        _searching = true;
+        try { _results = await Api.SearchUsersAsync(_query.Trim()); }
+        finally { _searching = false; }
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{char.ToUpper(parts[0][0])}{char.ToUpper(parts[1][0])}"
+            : char.ToUpper(parts[0][0]).ToString();
+    }
+}

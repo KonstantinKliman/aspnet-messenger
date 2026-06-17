@@ -1,0 +1,143 @@
+@page "/register"
+@inject AuthService Auth
+@inject NavigationManager Navigation
+
+<div class="flex min-h-screen items-center justify-center px-4 py-12">
+    <div class="w-full max-w-sm">
+        <h1 class="mb-8 text-center text-3xl font-semibold text-gray-900">
+            Messenger
+        </h1>
+
+        <div class="rounded-2xl bg-white p-8 shadow-md">
+            <h2 class="mb-6 text-xl font-medium text-gray-900">Регистрация</h2>
+
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="register">
+                <DataAnnotationsValidator />
+
+                <div class="mb-4">
+                    <label for="username" class="mb-1 block text-sm font-medium text-gray-700">
+                        Имя пользователя
+                    </label>
+                    <InputText
+                        id="username"
+                        @bind-Value="_model.Username"
+                        class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autocomplete="username"
+                        disabled="@_busy" />
+                    <ValidationMessage For="@(() => _model.Username)" class="mt-1 text-xs text-red-600" />
+                    <p class="mt-1 text-xs text-gray-500">3–32 символа, латиница, цифры и подчёркивания</p>
+                </div>
+
+                <div class="mb-4">
+                    <label for="displayName" class="mb-1 block text-sm font-medium text-gray-700">
+                        Отображаемое имя
+                    </label>
+                    <InputText
+                        id="displayName"
+                        @bind-Value="_model.DisplayName"
+                        class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autocomplete="name"
+                        disabled="@_busy" />
+                    <ValidationMessage For="@(() => _model.DisplayName)" class="mt-1 text-xs text-red-600" />
+                </div>
+
+                <div class="mb-6">
+                    <label for="password" class="mb-1 block text-sm font-medium text-gray-700">
+                        Пароль
+                    </label>
+                    <InputText
+                        id="password"
+                        type="password"
+                        @bind-Value="_model.Password"
+                        class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autocomplete="new-password"
+                        disabled="@_busy" />
+                    <ValidationMessage For="@(() => _model.Password)" class="mt-1 text-xs text-red-600" />
+                    <p class="mt-1 text-xs text-gray-500">Минимум 8 символов</p>
+                </div>
+
+                @if (_error is not null)
+                {
+                    <div class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                        @_error
+                    </div>
+                }
+
+                <button
+                    type="submit"
+                    disabled="@_busy"
+                    class="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    @if (_busy)
+                    {
+                        <span>Регистрируем…</span>
+                    }
+                    else
+                    {
+                        <span>Создать аккаунт</span>
+                    }
+                </button>
+            </EditForm>
+
+            <p class="mt-6 text-center text-sm text-gray-600">
+                Уже есть аккаунт?
+                <a href="/login" class="font-medium text-blue-600 hover:text-blue-700">
+                    Войти
+                </a>
+            </p>
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly RegisterFormModel _model = new();
+    private bool _busy;
+    private string? _error;
+
+    private async Task HandleSubmit()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var (ok, error) = await Auth.RegisterAsync(
+                _model.Username.Trim(),
+                _model.DisplayName.Trim(),
+                _model.Password);
+
+            if (ok)
+            {
+                Navigation.NavigateTo("/conversations");
+                return;
+            }
+            _error = error ?? "Не удалось зарегистрироваться";
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Не удалось связаться с сервером. Проверь подключение.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class RegisterFormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введи имя пользователя")]
+        [System.ComponentModel.DataAnnotations.MinLength(3, ErrorMessage = "Минимум 3 символа")]
+        [System.ComponentModel.DataAnnotations.MaxLength(32, ErrorMessage = "Максимум 32 символа")]
+        [System.ComponentModel.DataAnnotations.RegularExpression("^[a-zA-Z0-9_]+$",
+            ErrorMessage = "Только латиница, цифры и подчёркивания")]
+        public string Username { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введи имя для отображения")]
+        [System.ComponentModel.DataAnnotations.MaxLength(64, ErrorMessage = "Максимум 64 символа")]
+        public string DisplayName { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введи пароль")]
+        [System.ComponentModel.DataAnnotations.MinLength(8, ErrorMessage = "Минимум 8 символов")]
+        [System.ComponentModel.DataAnnotations.MaxLength(128, ErrorMessage = "Слишком длинный пароль")]
+        public string Password { get; set; } = "";
+    }
+}

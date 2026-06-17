@@ -1,0 +1,248 @@
+@inject ChatApi Api
+@inject AuthService Auth
+@inject ChatConnection Connection
+@inject IJSRuntime JS
+@using Messenger.Contracts.Dtos.Conversations
+@using Messenger.Contracts.Dtos.Messages
+@using Messenger.Contracts.Dtos.Users
+@implements IAsyncDisposable
+
+<div class="flex h-full flex-col bg-gray-50">
+    @if (_conversation is null)
+    {
+        <div class="flex h-full items-center justify-center text-gray-400">
+            Выбери диалог
+        </div>
+    }
+    else
+    {
+        <div class="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3">
+            <button @onclick="() => OnBack.InvokeAsync()"
+                    class="rounded-full p-1.5 text-gray-600 hover:bg-gray-100 transition md:hidden">
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                </svg>
+            </button>
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-medium text-blue-700">
+                @Initials(_peer?.DisplayName)
+            </div>
+            <div class="flex flex-col">
+                <div class="font-medium text-gray-900">@(_peer?.DisplayName ?? "Диалог")</div>
+                @if (_peerTyping)
+                {
+                    <div class="text-xs text-blue-600">печатает…</div>
+                }
+            </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-4 py-4" @ref="_scrollArea">
+            @if (_loadingHistory)
+            {
+                <div class="text-center text-sm text-gray-400">Загрузка…</div>
+            }
+            @foreach (var msg in _messages)
+            {
+                <MessageBubble Message="msg" IsOwn="msg.SenderId == _myId" />
+            }
+        </div>
+
+        <div class="border-t border-gray-200 bg-white px-4 py-3">
+            <div class="flex items-end gap-2">
+                <textarea value="@_draft" @oninput="OnInput" @onkeydown="OnKeyDown"
+                    rows="1" placeholder="Сообщение…"
+                    class="max-h-32 flex-1 resize-none rounded-2xl border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                <button @onclick="Send" disabled="@(string.IsNullOrWhiteSpace(_draft))"
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition hover:bg-blue-700 disabled:opacity-40">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-7 7m7-7l7 7" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? ConversationId { get; set; }
+    [Parameter] public EventCallback OnBack { get; set; }
+    [Parameter] public EventCallback OnMessageSent { get; set; }
+
+    private ConversationDto? _conversation;
+    private UserDto? _peer;
+    private Guid _myId;
+    private readonly List<MessageDto> _messages = [];
+    private string _draft = "";
+    private bool _loadingHistory;
+    private ElementReference _scrollArea;
+    private Guid? _loadedFor;
+    private IJSObjectReference? _jsModule;
+    private bool _typingSent;
+    private Timer? _typingTimer;
+    private bool _peerTyping;
+    private Timer? _peerTypingTimer;
+    private const int SelfTypingTimeoutMs = 2000;
+    private const int PeerTypingTimeoutMs = 4000;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ConversationId == _loadedFor) return;
+        _loadedFor = ConversationId;
+
+        _messages.Clear();
+        _conversation = null;
+        _peer = null;
+
+        if (ConversationId is null) return;
+
+        _myId = Auth.CurrentUser?.Id ?? Guid.Empty;
+        _loadingHistory = true;
+        StateHasChanged();
+
+        _conversation = await Api.GetConversationAsync(ConversationId.Value);
+        _peer = _conversation?.Participants.FirstOrDefault(p => p.Id != _myId);
+
+        var history = await Api.GetHistoryAsync(ConversationId.Value);
+        _messages.AddRange(history);
+        _loadingHistory = false;
+        StateHasChanged();
+
+        await ScrollToBottom();
+
+        await MarkConversationRead();
+    }
+
+    private async Task MarkConversationRead()
+    {
+        if (ConversationId is null) return;
+        var last = _messages.LastOrDefault();
+        if (last is null) return;
+
+        await Api.MarkReadAsync(ConversationId.Value, last.Id);
+        await Connection.MarkReadAsync(ConversationId.Value, last.Id);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await Send();
+        }
+    }
+
+    private async Task Send()
+    {
+        var text = _draft.Trim();
+        if (string.IsNullOrEmpty(text) || ConversationId is null) return;
+
+        _draft = "";
+        _typingSent = false;
+        if (_typingTimer is not null)
+            await _typingTimer.DisposeAsync();
+        await Connection.SendTypingAsync(ConversationId.Value, false);
+
+        // Сначала пробуем через хаб (быстрее, real-time)
+        var sent = await Connection.SendMessageAsync(ConversationId.Value, text);
+
+        // Фоллбэк на REST, если хаб не подключён
+        sent ??= await Api.SendMessageAsync(ConversationId.Value, text);
+
+        if (sent is not null)
+        {
+            _messages.Add(sent);
+            await OnMessageSent.InvokeAsync();
+            StateHasChanged();
+            await ScrollToBottom();
+        }
+    }
+
+    // Внешний вызов — когда придёт сообщение через SignalR (подключим позже)
+    public void AppendMessage(MessageDto msg)
+    {
+        if (msg.ConversationId != ConversationId) 
+            return;
+
+        if (_messages.Any(m => m.Id == msg.Id))
+            return;
+            
+        _messages.Add(msg);
+        
+        InvokeAsync(async () =>
+        {
+            StateHasChanged();
+            await ScrollToBottom();
+            await MarkConversationRead();
+        });
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{char.ToUpper(parts[0][0])}{char.ToUpper(parts[1][0])}"
+            : char.ToUpper(parts[0][0]).ToString();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_typingTimer is not null) await _typingTimer.DisposeAsync();
+        if (_peerTypingTimer is not null) await _peerTypingTimer.DisposeAsync();
+        if (_jsModule is not null) await _jsModule.DisposeAsync();
+    }
+    
+    protected override async  Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _jsModule = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Messenger.Client.Shared/chat.js");
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        if (_jsModule is not null)
+            await _jsModule.InvokeVoidAsync("scrollToBottom", _scrollArea);
+    }
+    
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _draft = e.Value?.ToString() ?? "";
+
+        if (ConversationId is null) return;
+
+        if (!_typingSent && !string.IsNullOrWhiteSpace(_draft))
+        {
+            _typingSent = true;
+            await Connection.SendTypingAsync(ConversationId.Value, true);
+        }
+        
+        if (_typingTimer is not null) 
+            await _typingTimer.DisposeAsync();
+        
+        _typingTimer = new Timer(async _ =>
+        {
+            _typingSent = false;
+            if (ConversationId is not null)
+                await Connection.SendTypingAsync(ConversationId.Value, false);
+        }, null, SelfTypingTimeoutMs, Timeout.Infinite);
+    }
+    
+    public void SetPeerTyping(Guid conversationId, bool isTyping)
+    {
+        if (conversationId != ConversationId) return;
+        _peerTyping = isTyping;
+        InvokeAsync(StateHasChanged);
+
+        if (isTyping)
+        {
+            // авто-сброс через 4 сек, если StopTyping не пришёл
+            _peerTypingTimer?.Dispose();
+            _peerTypingTimer = new Timer(_ =>
+            {
+                _peerTyping = false;
+                InvokeAsync(StateHasChanged);
+            }, null, PeerTypingTimeoutMs, Timeout.Infinite);
+        }
+    }
+}

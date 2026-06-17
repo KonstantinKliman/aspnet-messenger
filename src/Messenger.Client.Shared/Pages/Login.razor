@@ -1,0 +1,115 @@
+﻿@page "/"
+@page "/login"
+@inject AuthService Auth
+@inject NavigationManager Navigation
+
+<div class="flex min-h-screen items-center justify-center px-4 py-12">
+    <div class="w-full max-w-sm">
+        <h1 class="mb-8 text-center text-3xl font-semibold text-gray-900">
+            Messenger
+        </h1>
+
+        <div class="rounded-2xl bg-white p-8 shadow-md">
+            <h2 class="mb-6 text-xl font-medium text-gray-900">Вход</h2>
+
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="login">
+                <DataAnnotationsValidator />
+
+                <div class="mb-4">
+                    <label for="username" class="mb-1 block text-sm font-medium text-gray-700">
+                        Имя пользователя
+                    </label>
+                    <InputText
+                        id="username"
+                        @bind-Value="_model.Username"
+                        class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autocomplete="username"
+                        disabled="@_busy" />
+                    <ValidationMessage For="@(() => _model.Username)" class="mt-1 text-xs text-red-600" />
+                </div>
+
+                <div class="mb-6">
+                    <label for="password" class="mb-1 block text-sm font-medium text-gray-700">
+                        Пароль
+                    </label>
+                    <InputText
+                        id="password"
+                        type="password"
+                        @bind-Value="_model.Password"
+                        class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autocomplete="current-password"
+                        disabled="@_busy" />
+                    <ValidationMessage For="@(() => _model.Password)" class="mt-1 text-xs text-red-600" />
+                </div>
+
+                @if (_error is not null)
+                {
+                    <div class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                        @_error
+                    </div>
+                }
+
+                <button
+                    type="submit"
+                    disabled="@_busy"
+                    class="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    @if (_busy)
+                    {
+                        <span>Входим…</span>
+                    }
+                    else
+                    {
+                        <span>Войти</span>
+                    }
+                </button>
+            </EditForm>
+
+            <p class="mt-6 text-center text-sm text-gray-600">
+                Нет аккаунта?
+                <a href="/register" class="font-medium text-blue-600 hover:text-blue-700">
+                    Зарегистрироваться
+                </a>
+            </p>
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly LoginFormModel _model = new();
+    private bool _busy;
+    private string? _error;
+
+    private async Task HandleSubmit()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var ok = await Auth.LoginAsync(_model.Username.Trim(), _model.Password);
+            if (ok)
+            {
+                Navigation.NavigateTo("/conversations");
+                return;
+            }
+            _error = "Неверное имя пользователя или пароль";
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Не удалось связаться с сервером. Проверь подключение.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class LoginFormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введи имя пользователя")]
+        public string Username { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Введи пароль")]
+        public string Password { get; set; } = "";
+    }
+}

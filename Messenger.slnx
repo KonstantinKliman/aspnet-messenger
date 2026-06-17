@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/SolutionFolder/">
+    <File Path="compose.yml" />
+  </Folder>
+  <Project Path="src/Messenger.Api.BusinessLogic/Messenger.Api.BusinessLogic.csproj" />
+  <Project Path="src/Messenger.Api.DataAccess/Messenger.Api.DataAccess.csproj" />
+  <Project Path="src/Messenger.Domain/Messenger.Domain.csproj" />
+  <Project Path="src/Messenger.Api/Messenger.Api.csproj" />
+  <Project Path="src/Messenger.Client.Shared/Messenger.Client.Shared.csproj" />
+  <Project Path="src/Messenger.Client.Web/Messenger.Client.Web.csproj" />
+  <Project Path="src/Messenger.Contracts/Messenger.Contracts.csproj" />
+</Solution>
